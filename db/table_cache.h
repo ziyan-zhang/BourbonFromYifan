@@ -60,8 +60,10 @@ class TableCache {
   // Evict any entry for the specified file number
   void Evict(uint64_t file_number);
 
+  // fill file data (all keys in this file)
   bool FillData(const ReadOptions& options, FileMetaData* meta, adgMod::LearnedIndexData* data);
 
+  // Bourbon path for Get Request
   void LevelRead(const ReadOptions& options, uint64_t file_number,
                  uint64_t file_size, const Slice& k, void* arg,
                  void (*handle_result)(void*, const Slice&, const Slice&), int level,

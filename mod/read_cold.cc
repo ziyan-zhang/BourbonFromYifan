@@ -223,8 +223,10 @@ int main(int argc, char *argv[]) {
         write_options.sync = false;
         instance->ResetAll();
 
-
+        
         if (fresh_write && iteration == 0) {
+            // Load DB
+            // clear existing directory, clear page cache, trim SSD
             string command = "rm -rf " + db_location;
             system(command.c_str());
             system("sudo fstrim -a -v");
@@ -236,6 +238,7 @@ int main(int argc, char *argv[]) {
 
 
             instance->StartTimer(9);
+            // different load order
             int cut_size = keys.size() / 100000;
             std::vector<std::pair<int, int>> chunks;
             switch (load_type) {
@@ -268,6 +271,7 @@ int main(int argc, char *argv[]) {
                 default: assert(false && "Unsupported load type.");
             }
 
+            // perform load
             for (int cut = 0; cut < chunks.size(); ++cut) {
                 for (int i = chunks[cut].first; i < chunks[cut].second; ++i) {
 
@@ -285,6 +289,7 @@ int main(int argc, char *argv[]) {
 
             keys.clear();
 
+            // reopen DB and do offline leraning
             if (print_file_info && iteration == 0) db->PrintFileInfo();
             adgMod::db->WaitForBackground();
             delete db;
@@ -292,10 +297,13 @@ int main(int argc, char *argv[]) {
             adgMod::db->WaitForBackground();
             if (adgMod::MOD == 6 || adgMod::MOD == 7) {
                 Version* current = adgMod::db->versions_->current();
-
+                
+                // level learning
                 for (int i = 1; i < config::kNumLevels; ++i) {
                     LearnedIndexData::Learn(new VersionAndSelf{current, adgMod::db->version_count, current->learned_index_data_[i].get(), i});
                 }
+
+                // file learning
                 current->FileLearn();
             }
             cout << "Shutting down" << endl;
@@ -316,7 +324,7 @@ int main(int argc, char *argv[]) {
         }
 
 
-
+        // for mix workloads, copy out the whole DB to preserve the original one
         if (copy_out) {
             string db_location_mix = db_location + "_mix";
             string remove_command = "rm -rf " + db_location_mix;
@@ -356,6 +364,7 @@ int main(int argc, char *argv[]) {
         std::vector<uint64_t> detailed_times;
         bool start_new_event = true;
 
+        // perform workloads according to given distribution, read-write percentage, YCSB workload. (If they are set.)
         instance->StartTimer(13);
         uint64_t write_i = 0;
         for (int i = 0; i < num_operations; ++i) {
@@ -367,7 +376,9 @@ int main(int argc, char *argv[]) {
 
             bool write = use_ycsb ? ycsb_is_write[i] > 0 : (i % mix_base) < num_mix;
             if (write) {
+                // write
                 if (input_filename.empty()) {
+                    // used for ycsb default
                     instance->StartTimer(10);
                     status = db->Put(write_options, generate_key(to_string(distribution[i])), {values.data() + uniform_dist_value(e3), (uint64_t) adgMod::value_size});
                     instance->PauseTimer(10);
@@ -383,8 +394,10 @@ int main(int argc, char *argv[]) {
 
                     instance->StartTimer(10);
                     if (use_ycsb && ycsb_is_write[i] == 2) {
+                        // ycsb insert
                         status = db->Put(write_options, generate_key(to_string(10000000000 + index)), {values.data() + uniform_dist_value(e3), (uint64_t) adgMod::value_size});
                     } else {
+                        // other write
                         status = db->Put(write_options, keys[index], {values.data() + uniform_dist_value(e3), (uint64_t) adgMod::value_size});
                     }
                     instance->PauseTimer(10);
@@ -392,8 +405,10 @@ int main(int argc, char *argv[]) {
                     //cout << index << endl;
                 }
             } else {
+                // read
                 string value;
                 if (input_filename.empty()) {
+                    // ycsb default
                     instance->StartTimer(4);
                     status = db->Get(read_options, generate_key(to_string(distribution[i])), &value);
                     instance->PauseTimer(4);
@@ -406,8 +421,10 @@ int main(int argc, char *argv[]) {
                     const string& key = keys[index];
                     instance->StartTimer(4);
                     if (insert_bound != 0 && index > insert_bound) {
+                        // read inserted key
                         status = db->Get(read_options, generate_key(to_string(10000000000 + index)), &value);
                     } else {
+                        // other
                         status = db->Get(read_options, key, &value);
                     }
                     instance->PauseTimer(4);
@@ -432,6 +449,7 @@ int main(int argc, char *argv[]) {
                 if ((i + 1) % (num_operations / 10000) == 0) ::usleep(800000);
             }
 
+            // collect data every 1/10 of the run
             if ((i + 1) % (num_operations / 100) == 0) detailed_times.push_back(instance->GetTime());
             if ((i + 1) % (num_operations / 10) == 0) {
                 int level_read = levelled_counters[0].Sum();
@@ -476,6 +494,7 @@ int main(int argc, char *argv[]) {
         instance->PauseTimer(13, true);
 
 
+        // report various data after the run
 
         instance->ReportTime();
         for (int s = 0; s < times.size(); ++s) {
@@ -505,6 +524,7 @@ int main(int argc, char *argv[]) {
         delete db;
     }
 
+    // print out averages
 
     for (int s = 0; s < times.size(); ++s) {
         vector<uint64_t>& time = times[s];

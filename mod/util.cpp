@@ -26,12 +26,15 @@ namespace adgMod {
     leveldb::WriteOptions write_options;
     FileLearnedIndexData* file_data = nullptr;
     CBModel_Learn* learn_cb_model = nullptr;
-    uint64_t fd_limit;
+    uint64_t fd_limit = 1024 * 1024;
     bool use_filter = false;
     bool restart_read = false;
     bool fresh_write = false;
     bool reopen = false;
-    uint64_t learn_trigger_time = 500000;
+
+    // the time we wait before learning (as the file may die within this short time and
+    // if we learn, we waste the learning)
+    uint64_t learn_trigger_time = 50000000;
     int policy = 0;
     std::atomic<int> num_read(0);
     std::atomic<int> num_write(0);

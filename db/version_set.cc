@@ -360,12 +360,16 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
     uint64_t position_upper = 0;
     bool learned = false;
 
+    // Step FindFile
 #ifdef INTERNAL_TIMER
     instance->StartTimer(0);
 #endif
     if (level == 0) {
       // Level-0 files may overlap each other.  Find all files that
       // overlap user_key and process them in order from newest to oldest.
+
+      // We don't have level models for Level 0 as files overlap with each other
+      // So we follow the original LevelDB way in FindFile process
       tmp.reserve(num_files);
       for (uint32_t i = 0; i < num_files; i++) {
         FileMetaData* f = files[i];
@@ -385,69 +389,73 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       files = &tmp[0];
       num_files = tmp.size();
     } else {
-        if (adgMod::MOD == 6 || adgMod::MOD == 7) {
-            adgMod::LearnedIndexData* learned_this_level = learned_index_data_[level].get();
-            if (learned_this_level->Learned(this, adgMod::db->version_count, level)) {
-                //std::cout << "using model" << std::endl;
-                learned = true;
-                std::pair<uint64_t, uint64_t> bounds = learned_this_level->GetPosition(user_key);
+      if (adgMod::MOD == 6 || adgMod::MOD == 7) {
+        // Check if a level model is available
+        adgMod::LearnedIndexData* learned_this_level = learned_index_data_[level].get();
+        if (learned_this_level->Learned(this, adgMod::db->version_count, level)) {
+          //std::cout << "using model" << std::endl;
 
-                //printf("%lu %lu\n", bounds.first, bounds.second);
+          // use level model to get the target file
+          learned = true;
+          std::pair<uint64_t, uint64_t> bounds = learned_this_level->GetPosition(user_key);
+          size_t index;
+          if (bounds.first <= learned_this_level->MaxPosition()) {
+              learned_this_level->num_entries_accumulated.Search(user_key, bounds.first, bounds.second, &index, &position_lower, &position_upper);
 
-                size_t index;
-                if (bounds.first <= learned_this_level->MaxPosition()) {
-                    learned_this_level->num_entries_accumulated.Search(user_key, bounds.first, bounds.second, &index, &position_lower, &position_upper);
-
-                    //printf("%lu %lu %lu\n", index, position_lower, position_upper);
-                    FileMetaData* file = files_[level][index];
-                    if (ucmp->Compare(file->smallest.user_key(), user_key) <= 0) {
-                        files = &files_[level][index];
-                        num_files = 1;
-                    } else {
-                        files = nullptr;
-                        num_files = 0;
-                    }
-
-                } else {
-                    files = nullptr;
-                    num_files = 0;
-                }
-            } else {
-                // Binary search to find earliest index whose largest key >= ikey.
-                uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
-                if (index >= num_files) {
-                    files = nullptr;
-                    num_files = 0;
-                } else {
-                    tmp2 = files[index];
-                    if (ucmp->Compare(user_key, tmp2->smallest.user_key()) < 0) {
-                        // All of "tmp2" is past any data for user_key
-                        files = nullptr;
-                        num_files = 0;
-                    } else {
-                        files = &tmp2;
-                        num_files = 1;
-                    }
-                }
-            }
-        } else {
-            // Binary search to find earliest index whose largest key >= ikey.
-            uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
-            if (index >= num_files) {
+              //printf("%lu %lu %lu\n", index, position_lower, position_upper);
+              FileMetaData* file = files_[level][index];
+              if (ucmp->Compare(file->smallest.user_key(), user_key) <= 0) {
+                // predicted file may contain the target key
+                files = &files_[level][index];
+                num_files = 1;
+              } else {
+                // predicted file doesn't contain the target key (out of range)
                 files = nullptr;
                 num_files = 0;
+              }
+          } else {
+            // the model predicts a region larger than its size -- target key not in this level
+            files = nullptr;
+            num_files = 0;
+          }
+        } else {
+          // if no models available follow the baseline path
+
+          // Binary search to find earliest index whose largest key >= ikey.
+          uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
+          if (index >= num_files) {
+            files = nullptr;
+            num_files = 0;
+          } else {
+            tmp2 = files[index];
+            if (ucmp->Compare(user_key, tmp2->smallest.user_key()) < 0) {
+              // All of "tmp2" is past any data for user_key
+              files = nullptr;
+              num_files = 0;
             } else {
-                tmp2 = files[index];
-                if (ucmp->Compare(user_key, tmp2->smallest.user_key()) < 0) {
-                    // All of "tmp2" is past any data for user_key
-                    files = nullptr;
-                    num_files = 0;
-                } else {
-                    files = &tmp2;
-                    num_files = 1;
-                }
+              files = &tmp2;
+              num_files = 1;
             }
+          }
         }
+      } else {
+        // Binary search to find earliest index whose largest key >= ikey.
+        uint32_t index = FindFile(vset_->icmp_, files_[level], ikey);
+        if (index >= num_files) {
+          files = nullptr;
+          num_files = 0;
+        } else {
+          tmp2 = files[index];
+          if (ucmp->Compare(user_key, tmp2->smallest.user_key()) < 0) {
+            // All of "tmp2" is past any data for user_key
+            files = nullptr;
+            num_files = 0;
+          } else {
+            files = &tmp2;
+            num_files = 1;
+          }
+        }
+      }
     }
 #ifdef INTERNAL_TIMER
     auto temp2 = instance->PauseTimer(0);
@@ -473,9 +481,13 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       bool file_learned = false;
       instance->StartTimer(6);
       if (adgMod::MOD == 0 || adgMod::MOD == 8) {
+        // baseline path
         s = vset_->table_cache_->Get(options, f->number, f->file_size, ikey,
                                       &saver, SaveValue, level, f);
       } else {
+        // pass in possibly ready interval info (if level model is ready)
+        // If level model is not ready, this function will detect and see if file model is available
+        // param:learned means if level model is used
         s = vset_->table_cache_->Get(options, f->number, f->file_size, ikey,
                                      &saver, SaveValue, level, f, position_lower, position_upper, learned, this, &model, &file_learned);
       }
@@ -488,39 +500,41 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
 
 
 #ifdef RECORD_LEVEL_INFO
-        adgMod::learn_cb_model->AddLookupData(level, saver.state == kFound, file_learned, temp.second - temp.first);
+      adgMod::learn_cb_model->AddLookupData(level, saver.state == kFound, file_learned, temp.second - temp.first);
 //        if (model != nullptr) {
 //            model->FillCBAStat(saver.state == kFound, file_learned, temp.second - temp.first);
 //        }
 #endif
       switch (saver.state) {
         case kNotFound: {
+          // record negative internal lookup info
 #ifdef RECORD_LEVEL_INFO
-            adgMod::levelled_counters[4].Increment(level, temp.second - temp.first);
-            if (!adgMod::fresh_write) {
-                adgMod::file_stats_mutex.Lock();
-                auto iter = adgMod::file_stats.find(f->number);
-                if (iter != adgMod::file_stats.end()) {
-                    iter->second.num_lookup_neg += 1;
-                }
-                adgMod::file_stats_mutex.Unlock();
+          adgMod::levelled_counters[4].Increment(level, temp.second - temp.first);
+          if (!adgMod::fresh_write) {
+            adgMod::file_stats_mutex.Lock();
+            auto iter = adgMod::file_stats.find(f->number);
+            if (iter != adgMod::file_stats.end()) {
+                iter->second.num_lookup_neg += 1;
             }
+            adgMod::file_stats_mutex.Unlock();
+          }
 #endif
-            break;  // Keep searching in other files
+          break;  // Keep searching in other files
         }
         case kFound: {
+          // record positive internal lookup info
 #ifdef RECORD_LEVEL_INFO
-            adgMod::levelled_counters[3].Increment(level, temp.second - temp.first);
-            if (!adgMod::fresh_write) {
-                adgMod::file_stats_mutex.Lock();
-                auto iter = adgMod::file_stats.find(f->number);
-                if (iter != adgMod::file_stats.end()) {
-                    iter->second.num_lookup_pos += 1;
-                }
-                adgMod::file_stats_mutex.Unlock();
+          adgMod::levelled_counters[3].Increment(level, temp.second - temp.first);
+          if (!adgMod::fresh_write) {
+            adgMod::file_stats_mutex.Lock();
+            auto iter = adgMod::file_stats.find(f->number);
+            if (iter != adgMod::file_stats.end()) {
+                iter->second.num_lookup_pos += 1;
             }
+            adgMod::file_stats_mutex.Unlock();
+          }
 #endif
-            return s;
+          return s;
         }
         case kDeleted:
           s = Status::NotFound(Slice());  // Use empty error message for speed
@@ -1749,13 +1763,17 @@ bool Version::FillLevel(const ReadOptions &options, int level) {
     for (int j = 0; j < files_[level].size(); ++j) {
         FileMetaData* file = files_[level][j];
         //adgMod::test_num_file_segments = adgMod::test_num_level_segments / (uint32_t) files_[level].size();
+        
+        // Fill file data
         bool rt = adgMod::file_data->FillData(this, file);
         assert(rt);
+
+        // copy to level data
         auto& file_data = adgMod::file_data->GetData(file);
         data->string_keys.insert(data->string_keys.end(), file_data.begin(), file_data.end());
         //file_data.clear();
 
-
+        // update AccumulatedArray for level model
         uint64_t current_total = data->num_entries_accumulated.NumEntries();
         const Slice& largest_key = file->largest.user_key();
         data->num_entries_accumulated.Add(current_total + file_data.size(), string(largest_key.data(), largest_key.size()));

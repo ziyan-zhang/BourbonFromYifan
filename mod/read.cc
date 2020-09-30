@@ -78,7 +78,7 @@ void PutAndPrefetch(int lower, int higher, vector<string>& keys, int largest) {
     //cout << "Prefetch Complete" << endl;
 };
 
-
+// this application is deprecated, don't use.
 int main(int argc, char *argv[]) {
     int num_gets, num_iteration;
     float test_num_segments_base;
