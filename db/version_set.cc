@@ -1745,7 +1745,7 @@ void Version::PrintAll() const {
                            "\tNumber: %lu\n"
                            "\tSize: %lu\n"
                            "\tNumEntries: %lu\n"
-                           "\tKey Range: %s to %s\n", j, i, file->number, file->file_size, 0,
+                           "\tKey Range: %s to %s\n", j, i, file->number, file->file_size, 0ul,
                            small_key.c_str(), large_key.c_str());
         }
     }

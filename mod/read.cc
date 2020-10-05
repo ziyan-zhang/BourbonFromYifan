@@ -80,6 +80,7 @@ void PutAndPrefetch(int lower, int higher, vector<string>& keys, int largest) {
 
 // this application is deprecated, don't use.
 int main(int argc, char *argv[]) {
+    int rc;
     int num_gets, num_iteration;
     float test_num_segments_base;
     float num_pair_lower, num_pair_upper, num_pair_step;
@@ -138,7 +139,7 @@ int main(int argc, char *argv[]) {
         adgMod::test_num_level_segments =  (uint32_t) floor(num_pairs[outer] *  test_num_segments_base);
         for (size_t iteration = 0; iteration < num_iteration; ++iteration) {
             string command = "rm -rf " + db_location;
-            system(command.c_str());
+            rc = system(command.c_str());
 
             std::uniform_int_distribution<uint64_t > uniform_dist_file(0, (uint64_t) keys.size() - 1);
 

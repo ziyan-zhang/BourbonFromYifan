@@ -83,6 +83,7 @@ enum LoadType {
 };
 
 int main(int argc, char *argv[]) {
+    int rc;
     int num_operations, num_iteration, num_mix;
     float test_num_segments_base;
     float num_pair_step;
@@ -192,7 +193,7 @@ int main(int argc, char *argv[]) {
     string values(1024 * 1024, '0');
 
     if (copy_out) {
-        system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
+        rc = system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
     }
 
     if (num_mix > 1000) {
@@ -202,7 +203,7 @@ int main(int argc, char *argv[]) {
     
     for (size_t iteration = 0; iteration < num_iteration; ++iteration) {
         if (copy_out) {
-            system("sudo fstrim -a -v");
+            rc = system("sudo fstrim -a -v");
         }
 
         db_location = db_location_copy;
@@ -228,9 +229,9 @@ int main(int argc, char *argv[]) {
             // Load DB
             // clear existing directory, clear page cache, trim SSD
             string command = "rm -rf " + db_location;
-            system(command.c_str());
-            system("sudo fstrim -a -v");
-            system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
+            rc = system(command.c_str());
+            rc = system("sudo fstrim -a -v");
+            rc = system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
             cout << "delete and trim complete" << endl;
 
             status = DB::Open(options, db_location, &db);
@@ -330,15 +331,16 @@ int main(int argc, char *argv[]) {
             string remove_command = "rm -rf " + db_location_mix;
             string copy_command = "cp -r " + db_location + " " + db_location_mix;
 
-            system(remove_command.c_str());
-            system(copy_command.c_str());
+            rc = system(remove_command.c_str());
+            rc = system(copy_command.c_str());
             db_location = db_location_mix;
         }
 
 
 
 
-        if (evict) system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
+        if (evict) rc = system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches");
+        (void) rc;
 
         cout << "Starting up" << endl;
         status = DB::Open(options, db_location, &db);
